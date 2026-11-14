@@ -42,8 +42,8 @@ def temp_plugin():
     return load_package(dst), tmp
 
 
-class FakeCtx:
-    """Stand-in for PluginContext: only the config accessors are used."""
+class LegacyCtx:
+    """PluginContext of Pi Hub 8.3.0: config accessors only, no data_dir()."""
 
     def __init__(self, config: dict):
         self._config = dict(config)
@@ -53,3 +53,15 @@ class FakeCtx:
 
     def save_config(self) -> None:
         pass
+
+
+class FakeCtx(LegacyCtx):
+    """PluginContext of Pi Hub 8.3.1+: data_dir() is <plugin dir>/data, mode 0700."""
+
+    def __init__(self, config: dict, plugin_dir: str):
+        super().__init__(config)
+        self._data = os.path.join(plugin_dir, "data")
+
+    def data_dir(self) -> str:
+        os.makedirs(self._data, mode=0o700, exist_ok=True)
+        return self._data

@@ -25,7 +25,7 @@ import util
 from fakes import FakeSite, GridTiles, LiveReceiver
 
 if not util.CORE:
-    sys.exit("Set PIHUB_CORE to a Pi Hub 8.3+ checkout")
+    sys.exit("Set PIHUB_CORE to a Pi Hub 8.3.1+ checkout")
 
 from pi_hub import auth, config, server  # noqa: E402
 from pi_hub.plugins import manager as mgr_mod  # noqa: E402
@@ -84,6 +84,7 @@ def main() -> None:
                            {"label": "Feeder status", "url": "https://feeder.example/status", "probe": False}]})
     with open(os.path.join(dst, "config.json"), "w") as f:
         json.dump(pcfg, f)
+    # Seeded where 1.0.0 kept it: the plugin must move it into data/.
     seed_history(os.path.join(dst, "history.json"), time.time())
 
     m = mgr_mod.PluginManager()
@@ -102,9 +103,17 @@ def main() -> None:
     rc = 0
     try:
         time.sleep(1.5)                     # first poll
+        data = os.path.join(dst, "data")
+        moved = os.path.isfile(os.path.join(data, "history.json")) and \
+            not os.path.exists(os.path.join(dst, "history.json"))
+        print("history moved to data/:", "ok" if moved else "FAIL", flush=True)
         if script:
             env = dict(os.environ, HUB=hub, ADMIN=admin, VIEWER=viewer)
             rc = subprocess.run(["node", script], env=env).returncode
+            tiles_in_data = os.path.isdir(os.path.join(data, "tile-cache"))
+            print("tile cache in data/:", "ok" if tiles_in_data else "FAIL", flush=True)
+            if not (moved and tiles_in_data):
+                rc = rc or 1
         else:
             print(hub, admin, flush=True)
             time.sleep(600)

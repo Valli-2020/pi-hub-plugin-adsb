@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+Needs Pi Hub 8.3.1.
+
+- Clicking the header pill opens the Flights tab.
+- Links on the Flights tab open in a new browser tab when clicked. The
+  ADS-B receiver tab keeps its links for dashboards with frames turned off.
+- History and the tile cache live in the plugin's `data/` folder, which
+  survives updates. Files from 1.0.0 are moved there on the first start.
+- With the header pill switched off, nothing is shown in its place.
+
 ## 1.0.0
 
 First release.

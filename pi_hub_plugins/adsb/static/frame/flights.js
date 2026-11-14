@@ -211,9 +211,10 @@
   // Links
   var linkCard = el('div', 'card');
   linkCard.appendChild(el('h3', null, 'Links'));
-  var linkNote = el('p', 'small muted',
-    'Open these from the ADS-B receiver tab in the sidebar: this map runs in a sandbox that cannot open new windows.');
+  var linkNote = el('p', 'small muted', '');
   linkNote.style.margin = '0 0 8px';
+  linkNote.setAttribute('role', 'status');
+  linkNote.setAttribute('aria-live', 'polite');
   linkCard.appendChild(linkNote);
   var linkGrid = el('div', 'links');
   linkCard.appendChild(linkGrid);
@@ -989,12 +990,39 @@
 
   // ── Links ──────────────────────────────────────────────────────────────
   var LINK_STATE = { online: 'online', offline: 'offline', unknown: 'checking', off: '' };
+  // ph.open (Pi Hub 8.3.1+) asks the dashboard to open the link in a new tab;
+  // the sandbox itself cannot open windows.
+  var canOpen = typeof ph.open === 'function', openAt = 0, noteTimer = 0;
+  function linkMessage(text, bad) {
+    linkNote.textContent = text;
+    linkNote.style.color = bad ? 'var(--bad, #c33)' : '';
+    clearTimeout(noteTimer);
+    if (canOpen) noteTimer = setTimeout(function () { linkNote.textContent = ''; }, 6000);
+  }
+  function openLink(l) {
+    var t = Date.now();
+    if (t - openAt < 1100) return;          // the bridge allows one open per second
+    openAt = t;
+    ph.open(l.url).then(function (r) {
+      if (r && r.ok === false) linkMessage('Could not open ' + l.label + ': ' + (r.error || 'refused'), true);
+      else linkMessage('Opening ' + l.label + ' in a new tab.', false);
+    }, function (e) {
+      linkMessage('Could not open ' + l.label + ': ' + (e && e.message || 'error'), true);
+    });
+  }
   function renderLinks() {
     var links = (st.links && st.links.links) || [];
     linkCard.hidden = !links.length;
+    if (!canOpen && !linkNote.textContent)
+      linkMessage('Open these from the ADS-B receiver tab in the sidebar: this Pi Hub cannot open links from the map.', false);
     clear(linkGrid);
     links.forEach(function (l) {
-      var item = el('div', 'link');
+      var item = el(canOpen ? 'button' : 'div', 'link');
+      if (canOpen) {
+        item.type = 'button';
+        item.addEventListener('click', function () { openLink(l); });
+        item.setAttribute('aria-label', 'Open ' + l.label + ' in a new tab');
+      }
       item.dataset.state = l.state;
       item.title = l.url;
       var dot = el('span', 'ldot');
@@ -1005,6 +1033,7 @@
       tx.appendChild(el('div', 'lurl', l.url));
       item.appendChild(tx);
       if (LINK_STATE[l.state]) item.appendChild(el('span', 'small muted', LINK_STATE[l.state]));
+      if (canOpen) item.appendChild(el('span', 'lgo', '\u2197'));
       linkGrid.appendChild(item);
     });
   }

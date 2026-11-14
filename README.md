@@ -15,23 +15,25 @@ pages.
   the aircraft on the map); charts for today, 24 h and 7 days (aircraft,
   messages/s, max range); daily and all-time records (furthest, highest,
   fastest); receiver health from `stats.json` (signal, noise, gain, strong
-  signals, frequency error); your links with an online status.
+  signals, frequency error); your links with an online status. Click a link
+  to open it in a new browser tab.
 - **Header pill**: a plane and the current aircraft count, with the number
-  of aircraft with a position on hover. It can be switched off.
+  of aircraft with a position on hover. Click it to open the Flights tab. It
+  can be switched off.
 - **ADS-B receiver tab** (plain Pi Hub nodes, no frame): the same numbers in
-  short, receiver health and your links. These links open in a new browser
-  tab; the sandboxed Flights frame cannot open windows. This tab also works
-  with frames turned off (`/?noframes=1`).
+  short, receiver health and your links. This tab also works with frames
+  turned off (`/?noframes=1`).
 - **History**: one row per minute (aircraft, with position, MLAT, messages/s,
-  max range, unique aircraft) in `history.json` next to the plugin, rolled
+  max range, unique aircraft) in `data/history.json` in the plugin folder, rolled
   up to hourly rows after 48 hours and deleted after the number of days you
-  set. Daily records are kept for the same time.
+  set. Daily records are kept for the same time. The `data/` folder (history
+  and tile cache) survives plugin updates.
 
 Pi Hub polls the receiver; your browser never talks to it directly.
 
 ## Install
 
-1. In Pi Hub (8.3.0 or later): **Settings → Plugins**, add
+1. In Pi Hub (8.3.1 or later): **Settings → Plugins**, add
    `https://github.com/Valli-2020/pi-hub-plugin-adsb`, install `adsb`.
 2. Enable it and approve `ui.frame`, `ui.header`, `ui.style` and `ui.tab`.
 3. **Configure**: set the data URL of your receiver. Everything else has a
@@ -48,7 +50,7 @@ Pi Hub polls the receiver; your browser never talks to it directly.
 | Map | Map tiles | OpenStreetMap | OpenStreetMap, CARTO light, CARTO dark, CARTO auto (follows the dashboard theme) or Custom. |
 | Map | Custom tile URL | empty | For Custom: a template with `{z}`, `{x}` and `{y}`, e.g. `https://tiles.example.org/{z}/{x}/{y}.png`. |
 | Map | Custom attribution | empty | Shown in the corner of the map for Custom tiles. |
-| Map | Tile cache | 64 MB | Disk cache in the plugin folder (`tile-cache/`), least recently used tiles are removed first. 0 turns it off. |
+| Map | Tile cache | 64 MB | Disk cache in `data/tile-cache/` in the plugin folder, least recently used tiles are removed first. 0 turns it off. |
 | Map | Start zoom | 8 | 4 to 12. |
 | Map | Trail length | 5 min | 0 to 30; 0 hides trails. |
 | Header | Show the aircraft count | on | The header pill. |
@@ -103,9 +105,8 @@ Each GitHub release ships two assets:
 - `pi-hub-plugin-adsb-<version>.tar.gz`: the plugin code (top-level dir
   `pi_hub_plugins/adsb/`)
 
-Note: a store update replaces the plugin folder and keeps only
-`config.json`, so `history.json` and the tile cache start fresh after an
-update.
+Updating from 1.0.0 moves `history.json` and `tile-cache/` from the plugin
+folder into `data/` once, on the first start.
 
 ## License
 

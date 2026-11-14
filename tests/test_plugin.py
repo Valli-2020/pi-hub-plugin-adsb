@@ -26,7 +26,7 @@ def make_plugin(config: dict):
     mod, tmp = util.temp_plugin()
     p = mod.AdsbPlugin()
     cfg = mod.settings.migrate("", config)
-    p.load(util.FakeCtx(cfg))
+    p.load(util.FakeCtx(cfg, os.path.join(tmp, "adsb")))
     return mod, p, tmp
 
 
@@ -58,7 +58,7 @@ class PollerTest(unittest.TestCase):
         by = {a["hex"]: a for a in live["aircraft"]}
         self.assertAlmostEqual(by["aa0001"]["dist"], 55.6, delta=0.1)
         self.assertEqual(self.rx.hits, {"receiver.json": 1, "aircraft.json": 1, "stats.json": 1})
-        self.assertTrue(all(a.startswith("pi-hub-plugin-adsb/1.0.0 ") for a in self.rx.agents))
+        self.assertTrue(all(a.startswith("pi-hub-plugin-adsb/%s " % self.mod.VERSION) for a in self.rx.agents))
 
     def test_interval_from_config_and_live_reconfigure(self):
         self.p.tick()
@@ -130,16 +130,17 @@ class PollerTest(unittest.TestCase):
         self.assertEqual(stats["today"]["furthest"]["hex"], "aa0002")
         self.assertEqual(set(stats["series"]), {"today", "day", "week"})
         self.assertEqual(stats["columns"][0], "t")
-        # unload writes history.json next to the code (atomically)
+        # unload writes history.json into ctx.data_dir() (atomically)
         self.p.unload()
-        path = os.path.join(self.tmp, "adsb", "history.json")
+        path = os.path.join(self.tmp, "adsb", "data", "history.json")
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "adsb", "history.json")))
         with open(path) as f:
             data = json.load(f)
         self.assertEqual(len(data["minutes"]), 1)
         self.assertEqual(len(data["today"]["hex"]), 6)
         # and a fresh instance picks it up
         p2 = self.mod.AdsbPlugin()
-        p2.load(util.FakeCtx(self.p.ctx.get_config()))
+        p2.load(util.FakeCtx(self.p.ctx.get_config(), os.path.join(self.tmp, "adsb")))
         self.assertEqual(p2.route_stats({})["today"]["unique"], 6)
         p2.unload()
 
@@ -155,8 +156,7 @@ class PollerTest(unittest.TestCase):
         self.p.on_config_change({}, cfg)
         self.assertEqual(self.p.provider_pill()["text"], "✈︎ 2")
         self.p.on_config_change({}, dict(cfg, show_pill=False))
-        hidden = validate_node(self.p.provider_pill())
-        self.assertEqual(hidden, {"type": "stack", "dir": "row", "children": []})
+        self.assertIsNone(self.p.provider_pill())          # 8.3.1 renders nothing for None
         self.rx.docs["aircraft.json"]["aircraft"] = []
         self.p.on_config_change({}, dict(cfg, show_pill=True))
         self.p.tick()
@@ -164,7 +164,7 @@ class PollerTest(unittest.TestCase):
 
     def test_pill_hidden_without_url(self):
         self.p.on_config_change({}, {"data_url": ""})
-        self.assertEqual(self.p.provider_pill()["children"], [])
+        self.assertIsNone(self.p.provider_pill())
 
     def test_tab_provider(self):
         site = FakeSite(200)
@@ -194,7 +194,7 @@ class TilesTest(unittest.TestCase):
         self.mod, self.p, self.tmp = make_plugin({
             "tile_provider": "Custom", "tile_url": self.tiles.template,
             "tile_attribution": "Test tiles"})
-        self.cache = os.path.join(self.tmp, "adsb", "tile-cache")
+        self.cache = os.path.join(self.tmp, "adsb", "data", "tile-cache")
 
     def tearDown(self):
         self.p.unload()
@@ -215,7 +215,7 @@ class TilesTest(unittest.TestCase):
         self.assertTrue(t["src"].startswith("data:image/png;base64,"))
         self.assertTrue(base64.b64decode(t["src"].split(",", 1)[1]).startswith(b"\x89PNG"))
         self.assertEqual(len(self.tiles.requests), 6)
-        self.assertTrue(all(a.startswith("pi-hub-plugin-adsb/1.0.0 (+https://github.com/Valli-2020/")
+        self.assertTrue(all(a.startswith("pi-hub-plugin-adsb/%s (+https://github.com/Valli-2020/" % self.mod.VERSION)
                             for a in self.tiles.agents))
         # second call: from disk, no new upstream requests
         r2 = self.p.route_tiles(self.q(z=3, x=7, y=2, w=3, h=2))
@@ -379,6 +379,61 @@ class LinksTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class DataDirTest(unittest.TestCase):
+    """1.1.0 keeps history.json and tile-cache/ in ctx.data_dir()."""
+
+    def setUp(self):
+        self.mod, self.tmp = util.temp_plugin()
+        self.pdir = os.path.join(self.tmp, "adsb")
+        self.mod.HERE = self.pdir                         # the copy, not the repo
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def legacy_files(self):
+        with open(os.path.join(self.pdir, "history.json"), "w") as f:
+            json.dump({"version": 1, "minutes": [[60, 1, 1, 0, 2.0, 3.0, 1]], "hours": [],
+                       "days": {}, "today": {}}, f)
+        tile = os.path.join(self.pdir, "tile-cache", "k", "1", "0")
+        os.makedirs(tile)
+        with open(os.path.join(tile, "0"), "wb") as f:
+            f.write(png())
+
+    def test_one_time_move_from_the_plugin_folder(self):
+        self.legacy_files()
+        p = self.mod.AdsbPlugin()
+        p.load(util.FakeCtx({"history_days": 90}, self.pdir))
+        data = os.path.join(self.pdir, "data")
+        self.assertTrue(os.path.isfile(os.path.join(data, "history.json")))
+        self.assertTrue(os.path.isfile(os.path.join(data, "tile-cache", "k", "1", "0", "0")))
+        self.assertFalse(os.path.exists(os.path.join(self.pdir, "history.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.pdir, "tile-cache")))
+        self.assertEqual(os.stat(data).st_mode & 0o777, 0o700)
+        self.assertEqual(p._history.path, os.path.join(data, "history.json"))
+        self.assertEqual(p._tiles.total_bytes(), len(png()))
+        p.unload()
+        # a second load finds nothing left to move
+        self.assertEqual(self.mod.move_legacy_data(self.pdir, data), [])
+
+    def test_existing_data_is_never_overwritten(self):
+        data = os.path.join(self.pdir, "data")
+        os.makedirs(data)
+        with open(os.path.join(data, "history.json"), "w") as f:
+            f.write('{"version": 1, "minutes": []}')
+        self.legacy_files()
+        moved = self.mod.move_legacy_data(self.pdir, data)
+        self.assertEqual(moved, ["tile-cache"])
+        with open(os.path.join(data, "history.json")) as f:
+            self.assertEqual(json.load(f)["minutes"], [])
+        self.assertTrue(os.path.exists(os.path.join(self.pdir, "history.json")))
+
+    def test_fallback_without_data_dir(self):
+        p = self.mod.AdsbPlugin()
+        p.load(util.LegacyCtx({}))
+        self.assertEqual(p._history.path, os.path.join(self.pdir, "history.json"))
+        p.unload()
+
+
 # ── Config schema against the frozen 8.3 contract ──────────────────────────
 
 FIELD_TYPES = ("text", "password", "number", "checkbox", "select", "url", "textarea", "list")
@@ -502,6 +557,19 @@ class DescriptorTest(unittest.TestCase):
         need = {"header.pill": "ui.header", "style": "ui.style", "tab": "ui.tab"}
         used = {need[s] for s in slots} | ({"ui.frame"} if self.p.get_frames() else set())
         self.assertEqual(used, set(self.p.capabilities))
+
+    def test_pill_opens_the_flights_tab(self):
+        (pill,) = [c for c in self.p.get_contributions() if c.slot == "header.pill"]
+        tabs = {f.id for f in self.p.get_frames() if any(s["type"] == "tab" for s in f.surfaces)}
+        tabs |= {c.id for c in self.p.get_contributions() if c.slot == "tab"}
+        self.assertEqual(pill.opens, "flights")
+        self.assertIn(pill.opens, tabs)
+
+    def test_frame_opens_links_through_the_bridge(self):
+        with open(os.path.join(util.PLUGIN_SRC, "static", "frame", "flights.js")) as f:
+            js = f.read()
+        self.assertIn("ph.open(l.url)", js)
+        self.assertNotIn("window.open", js)
 
     def test_style_is_accepted_by_the_sanitizer(self):
         css = [c for c in self.p.get_contributions() if c.slot == "style"][0].static["css"]

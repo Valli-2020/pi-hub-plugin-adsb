@@ -80,6 +80,34 @@ if (SHOTS) {
   await a.page.waitForTimeout(600);
   await a.page.screenshot({ path: SHOTS + '/flights-desktop-dark.png', fullPage: true });
 }
+// Links in the frame open through ph.open (8.3.1): a new page, or the
+// dashboard's "Open link" dialog when the browser blocks the popup.
+const linkBtn = a.frame.locator('button.link', { hasText: 'tar1090' });
+await linkBtn.waitFor({ timeout: 8000 });
+const popup = a.ctx.waitForEvent('page', { timeout: 6000 }).catch(() => null);
+await linkBtn.click();
+let newPage = await popup;
+if (!newPage) {
+  const anchor = a.page.locator('a[target="_blank"]', { hasText: /open/i }).last();
+  await anchor.waitFor({ timeout: 4000 });
+  const p2 = a.ctx.waitForEvent('page', { timeout: 6000 });
+  await anchor.click();
+  newPage = await p2;
+}
+await newPage.waitForLoadState('domcontentloaded');
+check('frame link opens a new page', newPage.url().includes('/tar1090/'), newPage.url());
+await newPage.close();
+await a.frame.locator('.card p', { hasText: 'Opening tar1090' }).waitFor({ timeout: 5000 }).catch(() => {});
+
+// The pill opens the Flights tab
+await a.page.evaluate(() => document.querySelector('.nav-item[data-go="hosts"]').click());
+await a.page.waitForTimeout(400);
+await a.page.locator('[data-slot="header.pill"] .ph-badge').click();
+await a.page.waitForTimeout(600);
+const current = await a.page.evaluate(() => (document.querySelector('.nav-item[aria-current="page"]') || {}).textContent || '');
+check('clicking the pill opens Flights', current.trim() === 'Flights', current);
+check('pill is a link', (await a.page.locator('[data-slot="header.pill"] [role="link"]').count()) >= 1);
+
 // The declarative tab: links open natively
 await a.page.evaluate(() => { const n = [...document.querySelectorAll('.nav-item')].find(n => n.textContent.trim() === 'ADS-B receiver'); n.click(); });
 const link = a.page.locator('a.ph-link', { hasText: 'tar1090' });

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import threading
 import time
 from typing import Any
@@ -26,7 +27,7 @@ from .tiles import TileCache, TileError, parse_int, resolve_source
 
 log = logging.getLogger(__name__)
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 USER_AGENT = f"pi-hub-plugin-adsb/{VERSION} (+https://github.com/Valli-2020/pi-hub-plugin-adsb)"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -53,7 +54,7 @@ class AdsbPlugin(Plugin):
     name = "adsb"
     version = VERSION
     description = "ADS-B receiver dashboard: live map, statistics, records and links for readsb/tar1090"
-    min_core_version = "8.3.0"
+    min_core_version = "8.3.1"
     plugin_api_version = 2
     capabilities = ["ui.frame", "ui.header", "ui.style", "ui.tab"]
 
@@ -80,6 +81,10 @@ class AdsbPlugin(Plugin):
 
     def load(self, ctx: PluginContext) -> None:
         self.ctx = ctx
+        data = self._data_dir(ctx)
+        self._history = history_mod.History(os.path.join(data, "history.json"))
+        self._tiles.close()
+        self._tiles = TileCache(os.path.join(data, "tile-cache"), USER_AGENT)
         self._apply_config(ctx.get_config())
         with self._lock:
             self._history.load()
@@ -94,6 +99,21 @@ class AdsbPlugin(Plugin):
             except OSError as exc:
                 log.warning("adsb: could not save history: %s", exc)
         self._tiles.close()
+
+    @staticmethod
+    def _data_dir(ctx: Any) -> str:
+        """``ctx.data_dir()`` (kept across store updates since Pi Hub 8.3.1),
+        else the plugin folder.  Moves files left by 1.0.0 there once."""
+        fn = getattr(ctx, "data_dir", None)
+        if not callable(fn):
+            return HERE
+        try:
+            data = str(fn())
+        except (OSError, PermissionError) as exc:
+            log.warning("adsb: no data directory (%s); using the plugin folder", exc)
+            return HERE
+        move_legacy_data(HERE, data)
+        return data
 
     def migrate_config(self, old_version: str, config: dict) -> dict:
         return settings_mod.migrate(old_version, config)
@@ -135,7 +155,7 @@ class AdsbPlugin(Plugin):
 
     def get_contributions(self) -> list[Contribution]:
         return [
-            Contribution("header.pill", "count", self.provider_pill, poll=10),
+            Contribution("header.pill", "count", self.provider_pill, poll=10, opens="flights"),
             Contribution("style", "pill", static={"css": PILL_CSS}),
             Contribution("tab", "receiver", self.provider_tab, poll=30,
                          label="ADS-B receiver", icon_svg=PLANE_SVG, order=110),
@@ -357,12 +377,12 @@ class AdsbPlugin(Plugin):
 
     # ── Providers (never network I/O) ──────────────────────────────────────
 
-    def provider_pill(self, session: Any = None) -> dict:
+    def provider_pill(self, session: Any = None) -> dict | None:
         now = time.time()
         with self._lock:
             s = self._settings
             if not s["show_pill"] or not s["data_url"]:
-                return {"type": "stack", "dir": "row", "children": []}   # renders nothing
+                return None                  # Pi Hub 8.3.1+ renders nothing
             state, message = self._state(now)
             snap = self._snap or {}
             total, with_pos = snap.get("total", 0), snap.get("with_pos", 0)
@@ -428,6 +448,27 @@ class AdsbPlugin(Plugin):
                              "text": "Add links (tar1090, graphs1090, feeder pages) in "
                                      "Settings → Plugins → adsb → Configure."})
         return {"type": "stack", "dir": "col", "children": children}
+
+
+def move_legacy_data(old_dir: str, data_dir: str) -> list[str]:
+    """Move ``history.json`` and ``tile-cache/`` from *old_dir* (1.0.0 kept them
+    next to the code) into *data_dir*.  Never overwrites; returns what moved."""
+    moved = []
+    if os.path.realpath(old_dir) == os.path.realpath(data_dir):
+        return moved
+    for name in ("history.json", "history.json.corrupt", "tile-cache"):
+        src, dst = os.path.join(old_dir, name), os.path.join(data_dir, name)
+        if not os.path.lexists(src) or os.path.islink(src) or os.path.lexists(dst):
+            continue
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+            shutil.move(src, dst)
+            moved.append(name)
+        except OSError as exc:
+            log.warning("adsb: could not move %s to the data folder: %s", name, exc)
+    if moved:
+        log.info("adsb: moved %s to %s", ", ".join(moved), data_dir)
+    return moved
 
 
 def _map_info(s: dict) -> dict:

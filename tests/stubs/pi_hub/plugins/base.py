@@ -17,8 +17,9 @@ class TaskDef:
 
 class Contribution:
     def __init__(self, slot, id, provider=None, poll=30, order=100, caps=None,
-                 label="", icon_svg="", static=None):
+                 label="", icon_svg="", static=None, opens=""):
         self.slot, self.id, self.provider, self.poll, self.order = slot, id, provider, poll, order
+        self.opens = opens                                   # 8.3.1: pill -> tab id
         self.caps, self.label, self.icon_svg, self.static = caps or [], label, icon_svg, static
 
 
