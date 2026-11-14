@@ -1,0 +1,17 @@
+{
+  "data_url": "",
+  "poll_seconds": 5,
+  "lat": "",
+  "lon": "",
+  "range_rings_km": "50,100,150,200",
+  "tile_provider": "OpenStreetMap",
+  "tile_url": "",
+  "tile_attribution": "",
+  "tile_cache_mb": 64,
+  "start_zoom": 8,
+  "trail_minutes": 5,
+  "show_pill": true,
+  "pill_count_positions_only": false,
+  "links": [],
+  "history_days": 14
+}
